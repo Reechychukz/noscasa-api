@@ -1,33 +1,60 @@
 const axios = require('axios');
-const qs = require('qs');
 
+// In-memory cache (works per function instance on Vercel)
 let cachedToken = null;
 let tokenExpiry = null;
+let lastRequestTime = 0;
+const RATE_LIMIT_DELAY = 1000; // 1 second between requests
 
 async function getGuestyToken() {
-  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry - 5 * 60 * 1000) {
+  // Return cached token if still valid (with 5 min buffer)
+  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) {
+    console.log('Using cached token, expires in', Math.round((tokenExpiry - Date.now()) / 1000), 'seconds');
     return cachedToken;
   }
   
-  const response = await axios.post(
-    'https://open-api.guesty.com/oauth2/token',
-    new URLSearchParams({
-      grant_type: 'client_credentials',
-      scope: 'open-api',
-      client_id: process.env.GUESTY_CLIENT_ID,
-      client_secret: process.env.GUESTY_CLIENT_SECRET
-    }),
-    {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded'
-      }
-    }
-  );
+  // Rate limiting: Don't request more than once per second
+  const now = Date.now();
+  if (now - lastRequestTime < RATE_LIMIT_DELAY) {
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
+  }
+  lastRequestTime = Date.now();
   
-  cachedToken = response.data.access_token;
-  tokenExpiry = Date.now() + (response.data.expires_in * 1000);
-  return cachedToken;
+  try {
+    console.log('Fetching new token from Guesty Open API...');
+    
+    const params = new URLSearchParams();
+    params.append('grant_type', 'client_credentials');
+    params.append('scope', 'open-api');
+    params.append('client_id', process.env.GUESTY_CLIENT_ID);
+    params.append('client_secret', process.env.GUESTY_CLIENT_SECRET);
+    
+    const response = await axios.post(
+      'https://open-api.guesty.com/oauth2/token',
+      params,
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      }
+    );
+    
+    const { access_token, expires_in } = response.data;
+    
+    // Set expiration 5 minutes BEFORE actual expiry
+    tokenExpiry = Date.now() + (expires_in - 300) * 1000;
+    cachedToken = access_token;
+    
+    console.log('Token obtained successfully. Expires in', expires_in, 'seconds');
+    return cachedToken;
+  } catch (error) {
+    console.error('Token error:', error.response?.data || error.message);
+    
+    if (error.response?.status === 429 && cachedToken) {
+      console.log('Rate limited, using cached token as fallback');
+      return cachedToken;
+    }
+    
+    throw new Error('Failed to authenticate with Guesty');
+  }
 }
 
 module.exports = async (req, res) => {
@@ -56,40 +83,24 @@ module.exports = async (req, res) => {
     
     const token = await getGuestyToken();
     
-    // Build the available parameter as a JSON string with curly braces
-    const availableParam = JSON.stringify({
-      checkIn: check_in,
-      checkOut: check_out
+    // Use the format Guesty's example shows
+    const response = await axios.get('https://open-api.guesty.com/v1/listings', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'accept': 'application/json; charset=utf-8'
+      },
+      params: {
+        ids: listing_id,
+        active: true,
+        'pms.active': true,
+        listed: true,
+        'available.checkIn': check_in,
+        'available.checkOut': check_out,
+        ignoreFlexibleBlocks: false,
+      }
     });
     
-    console.log(`Checking availability for listing ${listing_id} from ${check_in} to ${check_out}`);
-    console.log(`Available param: ${availableParam}`);
-    
-    // Call Guesty API with the available parameter
-    const response = await axios.get(
-      'https://open-api.guesty.com/v1/listings',
-      {
-        params: {
-          ids: listing_id,
-          available: availableParam,
-          active: true,
-          limit: 10
-        },
-        paramsSerializer: (params) => {
-          // Use qs to properly serialize the available parameter
-          return qs.stringify(params, { encode: false, allowDots: false });
-        },
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json'
-        }
-      }
-    );
-    
-    // If the listing is in the response array, it's available
     const isAvailable = response.data && response.data.length > 0;
-    
-    console.log(`Availability result: ${isAvailable ? 'AVAILABLE' : 'NOT AVAILABLE'}`);
     
     return res.status(200).json({
       success: true,
@@ -105,11 +116,20 @@ module.exports = async (req, res) => {
   } catch (error) {
     console.error('Availability check error:', error.response?.data || error.message);
     
-    // Return a safe fallback - assume available but warn
+    if (error.response?.status === 429) {
+      return res.status(200).json({
+        success: true,
+        available: true,
+        message: 'Availability check is busy. Please proceed with booking - we will verify manually.',
+        warning: true,
+        rateLimited: true
+      });
+    }
+    
     return res.status(200).json({
       success: true,
       available: true,
-      message: 'Unable to verify availability. Please proceed with booking',
+      message: 'Unable to verify availability. Please proceed with booking.',
       warning: true
     });
   }
