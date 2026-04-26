@@ -109,7 +109,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       success: true,
       available: true,
-      message: 'Unable to verify availability. Please proceed with booking.',
+      message: 'Unable to verify availability. Please proceed with booking',
       warning: true
     });
   }
