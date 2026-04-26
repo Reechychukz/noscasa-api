@@ -1,39 +1,60 @@
 const axios = require('axios');
 
+// In-memory cache (works per function instance on Vercel)
 let cachedToken = null;
 let tokenExpiry = null;
+let lastRequestTime = 0;
+const RATE_LIMIT_DELAY = 1000; // 1 second between requests
 
 async function getGuestyToken() {
-  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry - 5 * 60 * 1000) {
-    console.log('Using cached token');
+  // Return cached token if still valid (with 5 min buffer as Guesty recommends)
+  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) {
+    console.log('Using cached token, expires in', Math.round((tokenExpiry - Date.now()) / 1000), 'seconds');
     return cachedToken;
   }
+  
+  // Rate limiting: Don't request more than once per second
+  const now = Date.now();
+  if (now - lastRequestTime < RATE_LIMIT_DELAY) {
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
+  }
+  lastRequestTime = Date.now();
   
   try {
     console.log('Fetching new token from Guesty Open API...');
     
+    const params = new URLSearchParams();
+    params.append('grant_type', 'client_credentials');
+    params.append('scope', 'open-api');
+    params.append('client_id', process.env.GUESTY_CLIENT_ID);
+    params.append('client_secret', process.env.GUESTY_CLIENT_SECRET);
+    
     const response = await axios.post(
       'https://open-api.guesty.com/oauth2/token',
-      new URLSearchParams({
-        grant_type: 'client_credentials',
-        scope: 'open-api',
-        client_id: process.env.GUESTY_CLIENT_ID,
-        client_secret: process.env.GUESTY_CLIENT_SECRET
-      }),
+      params,
       {
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       }
     );
     
-    cachedToken = response.data.access_token;
-    tokenExpiry = Date.now() + (response.data.expires_in * 1000);
-    console.log('Token obtained successfully');
+    const { access_token, expires_in } = response.data;
+    
+    // Set expiration 5 minutes BEFORE actual expiry (as Guesty recommends)
+    tokenExpiry = Date.now() + (expires_in - 300) * 1000;
+    cachedToken = access_token;
+    
+    console.log('Token obtained successfully. Expires in', expires_in, 'seconds');
+    console.log('Will refresh at', new Date(tokenExpiry));
     return cachedToken;
   } catch (error) {
     console.error('Token error:', error.response?.data || error.message);
+    
+    // If rate limited and we have an expired token, use it as fallback
+    if (error.response?.status === 429 && cachedToken) {
+      console.log('Rate limited, using cached token as fallback');
+      return cachedToken;
+    }
+    
     throw new Error('Failed to authenticate with Guesty');
   }
 }
@@ -57,7 +78,7 @@ module.exports = async (req, res) => {
   
   try {
     const {
-      listing_id,        // <-- NEW: Accept listing ID from form
+      listing_id,
       guest_name,
       guest_email,
       guest_phone,
@@ -102,7 +123,7 @@ module.exports = async (req, res) => {
     const guestyResponse = await axios.post(
       'https://open-api.guesty.com/v1/reservations',
       {
-        listingId: listing_id,  // <-- USING THE LISTING ID FROM THE FORM
+        listingId: listing_id,
         checkInDateLocalized: check_in,
         checkOutDateLocalized: check_out,
         status: 'confirmed',
@@ -140,6 +161,14 @@ module.exports = async (req, res) => {
         success: false,
         message: 'Invalid booking request. Please check your dates and information.',
         details: error.response?.data
+      });
+    }
+    
+    if (error.response?.status === 429) {
+      return res.status(200).json({
+        success: false,
+        message: 'Booking system is busy. Please try again in a few minutes.',
+        retryAfter: 60
       });
     }
     
