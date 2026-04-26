@@ -1,0 +1,17 @@
+{
+  "name": "guesty-webflow-booking",
+  "version": "1.0.0",
+  "description": "Guesty booking API for Webflow",
+  "main": "api/book.js",
+  "scripts": {
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "axios": "^1.15.2",
+    "cors": "^2.8.5",
+    "qs": "^6.15.1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
