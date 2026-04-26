@@ -6,11 +6,6 @@
         "memory": 1024
         }
     },
-    "env": {
-        "GUESTY_CLIENT_ID": "@guesty_client_id",
-        "GUESTY_CLIENT_SECRET": "@guesty_client_secret",
-        "GUESTY_LISTING_ID": "@guesty_listing_id"
-    },
     "headers": [
         {
         "source": "/api/(.*)",
