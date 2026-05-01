@@ -21,16 +21,16 @@ async function getGuestyToken() {
   lastRequestTime = Date.now();
   
   try {
-    console.log('Fetching new token from Guesty Open API...');
+    console.log('Fetching new token from Guesty Booking Engine API...');
     
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
-    params.append('scope', 'open-api');
+    params.append('scope', 'booking_engine:api');  // Different scope!
     params.append('client_id', process.env.GUESTY_CLIENT_ID);
     params.append('client_secret', process.env.GUESTY_CLIENT_SECRET);
     
     const response = await axios.post(
-      'https://open-api.guesty.com/oauth2/token',
+      'https://booking.guesty.com/oauth2/token',  // Different URL!
       params,
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
@@ -55,6 +55,27 @@ async function getGuestyToken() {
     
     throw new Error('Failed to authenticate with Guesty');
   }
+}
+
+/**
+ * Check if a date range is available by examining the calendar
+ */
+function areDatesAvailable(calendarData, checkIn, checkOut) {
+  const checkInDate = new Date(checkIn);
+  const checkOutDate = new Date(checkOut);
+  
+  // Filter calendar entries for the requested date range
+  const relevantDates = calendarData.filter(day => {
+    const dayDate = new Date(day.date);
+    return dayDate >= checkInDate && dayDate < checkOutDate;
+  });
+  
+  // Check if any day in the range is NOT available
+  const hasUnavailable = relevantDates.some(day => 
+    day.status !== 'available'
+  );
+  
+  return !hasUnavailable && relevantDates.length > 0;
 }
 
 module.exports = async (req, res) => {
@@ -83,38 +104,64 @@ module.exports = async (req, res) => {
     
     const token = await getGuestyToken();
     
-    // Use the format Guesty's example shows
-    const response = await axios.get('https://open-api.guesty.com/v1/listings', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'accept': 'application/json; charset=utf-8'
-      },
-      params: {
-        ids: listing_id,
-        active: true,
-        'pms.active': true,
-        listed: true,
-        'available.checkIn': check_in,
-        'available.checkOut': check_out,
-        ignoreFlexibleBlocks: false,
+    // Call the Booking Engine API calendar endpoint
+    const response = await axios.get(
+      `https://booking.guesty.com/api/listings/${listing_id}/calendar`,
+      {
+        params: {
+          from: check_in,
+          to: check_out
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'accept': 'application/json'
+        }
       }
-    });
+    );
     
-    const isAvailable = response.data && response.data.length > 0;
+    // Check if all dates in the range are available
+    const calendarData = response.data;
+    const isAvailable = areDatesAvailable(calendarData, check_in, check_out);
+    
+    // Find the first unavailable date for better error messaging
+    let unavailableDate = null;
+    if (!isAvailable) {
+      const checkInDate = new Date(check_in);
+      const checkOutDate = new Date(check_out);
+      const unavailableDay = calendarData.find(day => {
+        const dayDate = new Date(day.date);
+        return dayDate >= checkInDate && dayDate < checkOutDate && day.status !== 'available';
+      });
+      if (unavailableDay) {
+        unavailableDate = unavailableDay.date;
+      }
+    }
     
     return res.status(200).json({
       success: true,
       available: isAvailable,
       message: isAvailable 
         ? 'These dates are available! You can proceed with booking.'
-        : 'Sorry, these dates are not available. Please try different dates.',
+        : unavailableDate 
+          ? `Sorry, these dates are not available. The night of ${unavailableDate} is ${calendarData.find(d => d.date === unavailableDate)?.status}.`
+          : 'Sorry, these dates are not available. Please try different dates.',
       listing_id,
       check_in,
-      check_out
+      check_out,
+      calendar: process.env.NODE_ENV === 'development' ? calendarData : undefined
     });
     
   } catch (error) {
     console.error('Availability check error:', error.response?.data || error.message);
+    
+    if (error.response?.status === 401) {
+      return res.status(200).json({
+        success: true,
+        available: true,
+        message: 'Authentication issue. Please proceed with booking - we will verify manually.',
+        warning: true
+      });
+    }
     
     if (error.response?.status === 429) {
       return res.status(200).json({
