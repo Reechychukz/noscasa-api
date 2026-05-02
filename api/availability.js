@@ -44,7 +44,20 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       success: true,
       available: isAvailable,
-      message: isAvailable ? 'Available!' : 'Not available. Try different dates.'
+      message: isAvailable 
+        ? 'These dates are available! You can proceed with booking.'
+        : 'Sorry, these dates are not available. Please try different dates.',
+      listing_id,
+      check_in,
+      check_out
+    });
+    
+    // And for the warning fallback:
+    return res.status(200).json({
+      success: true,
+      available: true,
+      message: 'Availability check is currently limited. Please proceed with booking - we will verify manually.',
+      warning: true
     });
     
   } catch (error) {
