@@ -1,19 +1,17 @@
 const axios = require('axios');
 
-// In-memory cache (works per function instance on Vercel)
+// In-memory cache for token
 let cachedToken = null;
 let tokenExpiry = null;
 let lastRequestTime = 0;
-const RATE_LIMIT_DELAY = 1000; // 1 second between requests
+const RATE_LIMIT_DELAY = 1000;
 
 async function getGuestyToken() {
-  // Return cached token if still valid (with 5 min buffer as Guesty recommends)
   if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) {
     console.log('Using cached token, expires in', Math.round((tokenExpiry - Date.now()) / 1000), 'seconds');
     return cachedToken;
   }
   
-  // Rate limiting: Don't request more than once per second
   const now = Date.now();
   if (now - lastRequestTime < RATE_LIMIT_DELAY) {
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
@@ -21,16 +19,16 @@ async function getGuestyToken() {
   lastRequestTime = Date.now();
   
   try {
-    console.log('Fetching new token from Guesty Open API...');
+    console.log('Fetching new token from Guesty Booking Engine API...');
     
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
-    params.append('scope', 'open-api');
+    params.append('scope', 'booking_engine:api');
     params.append('client_id', process.env.GUESTY_CLIENT_ID);
     params.append('client_secret', process.env.GUESTY_CLIENT_SECRET);
     
     const response = await axios.post(
-      'https://open-api.guesty.com/oauth2/token',
+      'https://booking.guesty.com/oauth2/token',
       params,
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
@@ -38,23 +36,17 @@ async function getGuestyToken() {
     );
     
     const { access_token, expires_in } = response.data;
-    
-    // Set expiration 5 minutes BEFORE actual expiry (as Guesty recommends)
     tokenExpiry = Date.now() + (expires_in - 300) * 1000;
     cachedToken = access_token;
     
     console.log('Token obtained successfully. Expires in', expires_in, 'seconds');
-    console.log('Will refresh at', new Date(tokenExpiry));
     return cachedToken;
   } catch (error) {
     console.error('Token error:', error.response?.data || error.message);
-    
-    // If rate limited and we have an expired token, use it as fallback
     if (error.response?.status === 429 && cachedToken) {
       console.log('Rate limited, using cached token as fallback');
       return cachedToken;
     }
-    
     throw new Error('Failed to authenticate with Guesty');
   }
 }
@@ -88,7 +80,7 @@ module.exports = async (req, res) => {
       notes
     } = req.body;
     
-    // Validation - now requiring listing_id
+    // Validation
     if (!listing_id || !guest_name || !guest_email || !check_in || !check_out || !guests) {
       return res.status(400).json({
         success: false,
@@ -114,26 +106,31 @@ module.exports = async (req, res) => {
       });
     }
     
-    console.log(`Processing booking for ${guest_name} at listing ${listing_id}`);
-    
-    // Get OAuth token
     const token = await getGuestyToken();
     
-    // Create reservation with dynamic listing_id
-    const guestyResponse = await axios.post(
-      'https://open-api.guesty.com/v1/reservations',
-      {
-        listingId: listing_id,
-        checkInDateLocalized: check_in,
-        checkOutDateLocalized: check_out,
-        status: 'confirmed',
-        guest: {
-          firstName: guest_name.split(' ')[0] || guest_name,
-          lastName: guest_name.split(' ').slice(1).join(' ') || 'Guest',
-          email: guest_email,
-          phone: guest_phone || ''
-        }
-      },
+    // Parse guest name
+    const firstName = guest_name.split(' ')[0] || guest_name;
+    const lastName = guest_name.split(' ').slice(1).join(' ') || 'Guest';
+    
+    // ========== STEP 1: Create a Quote ==========
+    console.log(`Step 1: Creating quote for listing ${listing_id}`);
+    
+    const quotePayload = {
+      listingId: listing_id,
+      checkInDateLocalized: check_in,
+      checkOutDateLocalized: check_out,
+      guestsCount: parseInt(guests, 10) || 1,
+      numberOfGuests: {
+        numberOfAdults: parseInt(guests, 10) || 1,
+        numberOfChildren: 0,
+        numberOfInfants: 0,
+        numberOfPets: 0
+      }
+    };
+    
+    const quoteResponse = await axios.post(
+      'https://booking.guesty.com/api/reservations/quotes',
+      quotePayload,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -143,24 +140,109 @@ module.exports = async (req, res) => {
       }
     );
     
+    const quote = quoteResponse.data;
+    const quoteId = quote._id;
+    
+    if (!quoteId) {
+      throw new Error('Failed to get quote ID from Guesty');
+    }
+    
+    console.log(`Quote created. ID: ${quoteId}, Expires: ${quote.expiresAt}`);
+    
+    // Get the first available rate plan from the quote
+    const ratePlans = quote.rates?.ratePlans || [];
+    if (ratePlans.length === 0) {
+      throw new Error('No rate plans available for this quote');
+    }
+    
+    const selectedRatePlan = ratePlans[0];
+    const ratePlanId = selectedRatePlan.ratePlan?._id;
+    
+    if (!ratePlanId) {
+      throw new Error('No rate plan ID found in quote');
+    }
+    
+    console.log(`Selected rate plan: ${ratePlanId}`);
+    
+    // Extract pricing for response
+    const pricing = selectedRatePlan.ratePlan?.money || {};
+    console.log(`Pricing: ${pricing.currency} ${pricing.fareAccommodation} + cleaning ${pricing.fareCleaning}`);
+    
+    // ========== STEP 2: Create Reservation from Quote ==========
+    console.log(`Step 2: Creating reservation from quote ${quoteId}`);
+    
+    // Create reservation using the quote
+    const reservationPayload = {
+      quoteId: quoteId,
+      ratePlanId: ratePlanId,
+      guest: {
+        firstName: firstName,
+        lastName: lastName,
+        email: guest_email,
+        phone: guest_phone || ''
+      },
+      notes: notes || ''
+    };
+    
+    const reservationResponse = await axios.post(
+      'https://booking.guesty.com/api/reservations',
+      reservationPayload,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      }
+    );
+    
+    const reservation = reservationResponse.data;
+    
+    console.log(`Reservation created successfully. ID: ${reservation._id}`);
+    
+    // Calculate total price
+    const totalPrice = (pricing.fareAccommodation || 0) + (pricing.fareCleaning || 0);
+    
+    // ========== SUCCESS RESPONSE ==========
     return res.status(200).json({
       success: true,
-      message: 'Booking request submitted successfully! Check your email for confirmation.',
-      reservationId: guestyResponse.data?.id,
-      listingId: listing_id,
+      message: `Booking confirmed! Your reservation ID is ${reservation._id}. A confirmation email has been sent.`,
+      reservationId: reservation._id,
+      quoteId: quoteId,
       guestName: guest_name,
       checkIn: check_in,
-      checkOut: check_out
+      checkOut: check_out,
+      price: {
+        accommodation: pricing.fareAccommodation,
+        cleaning: pricing.fareCleaning,
+        currency: pricing.currency || 'USD',
+        total: totalPrice
+      }
     });
     
   } catch (error) {
-    console.error('Booking error:', error.response?.data || error.message);
+    console.error('Booking process error:', error.response?.data || error.message);
     
+    // Handle specific errors
     if (error.response?.status === 400) {
+      const errorCode = error.response?.data?.error?.code;
+      if (errorCode === 'RATE_PLAN_NOT_FOUND') {
+        return res.status(400).json({
+          success: false,
+          message: 'This property is not configured for online booking. Please contact us directly.'
+        });
+      }
       return res.status(400).json({
         success: false,
         message: 'Invalid booking request. Please check your dates and information.',
         details: error.response?.data
+      });
+    }
+    
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      return res.status(500).json({
+        success: false,
+        message: 'Booking system configuration error. Please contact support.'
       });
     }
     
