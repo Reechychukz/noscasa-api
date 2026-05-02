@@ -1,54 +1,36 @@
 const axios = require('axios');
-
-// In-memory cache for token
-let cachedToken = null;
-let tokenExpiry = null;
-let lastRequestTime = 0;
-const RATE_LIMIT_DELAY = 1000;
+const { get, set } = require('@vercel/edge-config');
 
 async function getGuestyToken() {
-  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) {
-    console.log('Using cached token');
-    return cachedToken;
+  // Try to get cached token from Edge Config
+  const cached = await get('guesty_token');
+  if (cached && cached.expiresAt && Date.now() < cached.expiresAt) {
+    console.log('Using cached token from Edge Config');
+    return cached.token;
   }
   
-  const now = Date.now();
-  if (now - lastRequestTime < RATE_LIMIT_DELAY) {
-    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
-  }
-  lastRequestTime = Date.now();
+  // Request new token
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('scope', 'open-api');
+  params.append('client_id', process.env.GUESTY_CLIENT_ID);
+  params.append('client_secret', process.env.GUESTY_CLIENT_SECRET);
   
-  try {
-    console.log('Fetching new token from Guesty Open API...');
-    
-    const params = new URLSearchParams();
-    params.append('grant_type', 'client_credentials');
-    params.append('scope', 'open-api');
-    params.append('client_id', process.env.GUESTY_CLIENT_ID);
-    params.append('client_secret', process.env.GUESTY_CLIENT_SECRET);
-    
-    const response = await axios.post(
-      'https://open-api.guesty.com/oauth2/token',
-      params,
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      }
-    );
-    
-    const { access_token, expires_in } = response.data;
-    tokenExpiry = Date.now() + (expires_in - 300) * 1000;
-    cachedToken = access_token;
-    
-    console.log('Token obtained successfully');
-    return cachedToken;
-  } catch (error) {
-    console.error('Token error:', error.response?.data || error.message);
-    if (error.response?.status === 429 && cachedToken) {
-      return cachedToken;
-    }
-    throw new Error('Failed to authenticate with Guesty');
-  }
+  const response = await axios.post('https://open-api.guesty.com/oauth2/token', params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  
+  const tokenData = {
+    token: response.data.access_token,
+    expiresAt: Date.now() + (response.data.expires_in - 300) * 1000
+  };
+  
+  // Store in Edge Config
+  await set('guesty_token', tokenData);
+  
+  return tokenData.token;
 }
+
 
 module.exports = async (req, res) => {
   // Enable CORS
