@@ -27,7 +27,10 @@ module.exports = async (req, res) => {
   try {
     const { listing_id, check_in, check_out } = req.query;
     if (!listing_id || !check_in || !check_out) {
-      return res.status(400).json({ success: false, message: 'Missing parameters' });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Missing parameters' 
+      });
     }
     
     const token = await getGuestyToken();
@@ -41,6 +44,7 @@ module.exports = async (req, res) => {
     
     const isAvailable = response.data && response.data.length > 0;
     
+    // Return success with proper message
     return res.status(200).json({
       success: true,
       available: isAvailable,
@@ -52,15 +56,15 @@ module.exports = async (req, res) => {
       check_out
     });
     
-    // And for the warning fallback:
+  } catch (error) {
+    console.error('Availability error:', error.response?.data || error.message);
+    
+    // Warning fallback - only reached if the API call fails
     return res.status(200).json({
       success: true,
       available: true,
       message: 'Availability check is currently limited. Please proceed with booking - we will verify manually.',
       warning: true
     });
-    
-  } catch (error) {
-    return res.status(200).json({ success: true, available: true, warning: true });
   }
 };
