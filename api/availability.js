@@ -1,19 +1,16 @@
 const axios = require('axios');
 
-// In-memory cache (works per function instance on Vercel)
 let cachedToken = null;
 let tokenExpiry = null;
 let lastRequestTime = 0;
-const RATE_LIMIT_DELAY = 1000; // 1 second between requests
+const RATE_LIMIT_DELAY = 1000;
 
 async function getGuestyToken() {
-  // Return cached token if still valid (with 5 min buffer)
   if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) {
-    console.log('Using cached token, expires in', Math.round((tokenExpiry - Date.now()) / 1000), 'seconds');
+    console.log('Using cached token');
     return cachedToken;
   }
   
-  // Rate limiting: Don't request more than once per second
   const now = Date.now();
   if (now - lastRequestTime < RATE_LIMIT_DELAY) {
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
@@ -21,73 +18,39 @@ async function getGuestyToken() {
   lastRequestTime = Date.now();
   
   try {
-    console.log('Fetching new token from Guesty Booking Engine API...');
+    console.log('Fetching new token from Guesty Open API...');
     
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
-    params.append('scope', 'booking_engine:api');  // Different scope!
+    params.append('scope', 'open-api');  // NOT booking_engine:api
     params.append('client_id', process.env.GUESTY_CLIENT_ID);
     params.append('client_secret', process.env.GUESTY_CLIENT_SECRET);
     
     const response = await axios.post(
-      'https://booking.guesty.com/oauth2/token',  // Different URL!
+      'https://open-api.guesty.com/oauth2/token',  // NOT booking.guesty.com
       params,
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      }
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
     
     const { access_token, expires_in } = response.data;
-    
-    // Set expiration 5 minutes BEFORE actual expiry
     tokenExpiry = Date.now() + (expires_in - 300) * 1000;
     cachedToken = access_token;
     
-    console.log('Token obtained successfully. Expires in', expires_in, 'seconds');
+    console.log('Token obtained successfully');
     return cachedToken;
   } catch (error) {
     console.error('Token error:', error.response?.data || error.message);
-    
-    if (error.response?.status === 429 && cachedToken) {
-      console.log('Rate limited, using cached token as fallback');
-      return cachedToken;
-    }
-    
+    if (error.response?.status === 429 && cachedToken) return cachedToken;
     throw new Error('Failed to authenticate with Guesty');
   }
 }
 
-/**
- * Check if a date range is available by examining the calendar
- */
-function areDatesAvailable(calendarData, checkIn, checkOut) {
-  const checkInDate = new Date(checkIn);
-  const checkOutDate = new Date(checkOut);
-  
-  // Filter calendar entries for the requested date range
-  const relevantDates = calendarData.filter(day => {
-    const dayDate = new Date(day.date);
-    return dayDate >= checkInDate && dayDate < checkOutDate;
-  });
-  
-  // Check if any day in the range is NOT available
-  const hasUnavailable = relevantDates.some(day => 
-    day.status !== 'available'
-  );
-  
-  return !hasUnavailable && relevantDates.length > 0;
-}
-
 module.exports = async (req, res) => {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') {
     return res.status(405).json({ success: false, message: 'Method not allowed' });
   }
@@ -104,75 +67,48 @@ module.exports = async (req, res) => {
     
     const token = await getGuestyToken();
     
-    // Call the Booking Engine API calendar endpoint
+    // Open API format for availability
+    const availableParam = `{"checkIn":"${check_in}","checkOut":"${check_out}"}`;
+    
     const response = await axios.get(
-      `https://booking.guesty.com/api/listings/${listing_id}/calendar`,
+      'https://open-api.guesty.com/v1/listings',
       {
         params: {
-          from: check_in,
-          to: check_out
+          ids: listing_id,
+          available: availableParam,
+          active: true,
+          limit: 10
+        },
+        paramsSerializer: (params) => {
+          return Object.keys(params)
+            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+            .join('&');
         },
         headers: {
           'Authorization': `Bearer ${token}`,
-          'accept': 'application/json'
+          'Accept': 'application/json'
         }
       }
     );
     
-    // Check if all dates in the range are available
-    const calendarData = response.data;
-    const isAvailable = areDatesAvailable(calendarData, check_in, check_out);
-    
-    // Find the first unavailable date for better error messaging
-    let unavailableDate = null;
-    if (!isAvailable) {
-      const checkInDate = new Date(check_in);
-      const checkOutDate = new Date(check_out);
-      const unavailableDay = calendarData.find(day => {
-        const dayDate = new Date(day.date);
-        return dayDate >= checkInDate && dayDate < checkOutDate && day.status !== 'available';
-      });
-      if (unavailableDay) {
-        unavailableDate = unavailableDay.date;
-      }
-    }
+    // If the listing is in the response array, it's available
+    const isAvailable = response.data && response.data.length > 0;
     
     return res.status(200).json({
       success: true,
       available: isAvailable,
       message: isAvailable 
         ? 'These dates are available! You can proceed with booking.'
-        : unavailableDate 
-          ? `Sorry, these dates are not available. The night of ${unavailableDate} is ${calendarData.find(d => d.date === unavailableDate)?.status}.`
-          : 'Sorry, these dates are not available. Please try different dates.',
+        : 'Sorry, these dates are not available. Please try different dates.',
       listing_id,
       check_in,
-      check_out,
-      calendar: process.env.NODE_ENV === 'development' ? calendarData : undefined
+      check_out
     });
     
   } catch (error) {
     console.error('Availability check error:', error.response?.data || error.message);
     
-    if (error.response?.status === 401) {
-      return res.status(200).json({
-        success: true,
-        available: true,
-        message: 'Authentication issue. Please proceed with booking - we will verify manually.',
-        warning: true
-      });
-    }
-    
-    if (error.response?.status === 429) {
-      return res.status(200).json({
-        success: true,
-        available: true,
-        message: 'Availability check is busy. Please proceed with booking - we will verify manually.',
-        warning: true,
-        rateLimited: true
-      });
-    }
-    
+    // Fallback - assume available so booking can proceed
     return res.status(200).json({
       success: true,
       available: true,
