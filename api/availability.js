@@ -1,11 +1,15 @@
 const axios = require('axios');
-
-let cachedToken = null;
-let tokenExpiry = null;
+const { get, set } = require('@vercel/edge-config');
 
 async function getGuestyToken() {
-  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) return cachedToken;
+  // Try to get cached token from Edge Config
+  const cached = await get('guesty_token');
+  if (cached && cached.expiresAt && Date.now() < cached.expiresAt) {
+    console.log('Using cached token from Edge Config');
+    return cached.token;
+  }
   
+  // Request new token
   const params = new URLSearchParams();
   params.append('grant_type', 'client_credentials');
   params.append('scope', 'open-api');
@@ -16,10 +20,17 @@ async function getGuestyToken() {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
   });
   
-  tokenExpiry = Date.now() + (response.data.expires_in - 300) * 1000;
-  cachedToken = response.data.access_token;
-  return cachedToken;
+  const tokenData = {
+    token: response.data.access_token,
+    expiresAt: Date.now() + (response.data.expires_in - 300) * 1000
+  };
+  
+  // Store in Edge Config
+  await set('guesty_token', tokenData);
+  
+  return tokenData.token;
 }
+
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
