@@ -1,0 +1,482 @@
+<!--
+    NoesCasa Booking Widget — Webflow Custom Code Embed
+    =====================================================
+    Paste this entire file into a Webflow Embed block.
+
+    Before publishing, replace the 3 values below:
+        API_BASE       → your Vercel deployment URL
+        STRIPE_PK      → your Stripe publishable key (pk_live_...)
+        LISTING_TITLE  → your property name (optional, auto-fetched from Guesty)
+-->
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<script src="https://js.stripe.com/v3/"></script>
+
+<style>
+    #ncb * { box-sizing: border-box; margin: 0; padding: 0; }
+    #ncb {
+        font-family: 'DM Sans', sans-serif;
+        background: #1a1814;
+        color: #e8e0d0;
+        border-radius: 16px;
+        overflow: hidden;
+        width: 100%;
+        max-width: 460px;
+    }
+
+    /* Header */
+    .nh { padding: 26px 30px 18px; border-bottom: 0.5px solid rgba(232,224,208,0.1); display: flex; align-items: flex-end; justify-content: space-between; }
+    .nh-eye { font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: #c8a96e; margin-bottom: 5px; }
+    .nh-title { font-family: 'Cormorant Garamond', serif; font-size: 23px; font-weight: 300; color: #f0e8d8; }
+    .nh-right { text-align: right; }
+    .nh-from { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: rgba(232,224,208,0.4); margin-bottom: 3px; }
+    .nh-price { font-family: 'Cormorant Garamond', serif; font-size: 24px; font-weight: 300; color: #c8a96e; }
+    .nh-price span { font-size: 12px; color: rgba(200,169,110,0.65); }
+
+    /* Steps */
+    .ns { display: flex; border-bottom: 0.5px solid rgba(232,224,208,0.07); }
+    .ns-btn { flex: 1; padding: 12px 6px; background: none; border: none; border-right: 0.5px solid rgba(232,224,208,0.07); color: rgba(232,224,208,0.28); font-family: 'DM Sans', sans-serif; font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; cursor: default; position: relative; }
+    .ns-btn:last-child { border-right: none; }
+    .ns-btn.active { color: #c8a96e; }
+    .ns-btn.active::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1.5px; background: #c8a96e; }
+    .ns-btn.done { color: rgba(200,169,110,0.4); }
+    .ns-num { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 1px solid currentColor; font-size: 8px; line-height: 14px; text-align: center; margin-right: 4px; }
+
+    /* Panels */
+    .np { display: none; padding: 22px 28px 26px; }
+    .np.active { display: block; }
+
+    /* Labels */
+    .nl { font-size: 9.5px; letter-spacing: 2.5px; text-transform: uppercase; color: rgba(232,224,208,0.38); margin-bottom: 13px; display: block; }
+
+    /* Inputs */
+    .ni {
+        width: 100%; background: rgba(255,255,255,0.04); border: 0.5px solid rgba(232,224,208,0.13);
+        border-radius: 8px; padding: 11px 13px; color: #e8e0d0; font-family: 'DM Sans', sans-serif;
+        font-size: 13.5px; font-weight: 300; outline: none; transition: border-color 0.2s, background 0.2s;
+        -webkit-appearance: none; appearance: none;
+    }
+    .ni::-webkit-calendar-picker-indicator { filter: invert(0.55); cursor: pointer; }
+    .ni:focus { border-color: rgba(200,169,110,0.45); background: rgba(200,169,110,0.05); }
+
+    /* Grid helpers */
+    .ng2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .nfull { grid-column: 1 / -1; }
+    .nmb14 { margin-bottom: 14px; }
+    .nmb20 { margin-bottom: 20px; }
+
+    /* Counter */
+    .nc { display: flex; align-items: center; background: rgba(255,255,255,0.04); border: 0.5px solid rgba(232,224,208,0.13); border-radius: 8px; overflow: hidden; }
+    .nc-btn { background: none; border: none; color: #c8a96e; font-size: 17px; width: 36px; height: 40px; cursor: pointer; transition: background 0.15s; }
+    .nc-btn:hover { background: rgba(200,169,110,0.1); }
+    .nc-val { flex: 1; text-align: center; font-size: 14px; color: #e8e0d0; }
+
+    /* Summary box */
+    .nbox { background: rgba(200,169,110,0.06); border: 0.5px solid rgba(200,169,110,0.18); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+    .nbox-alt { background: rgba(255,255,255,0.025); }
+    .nrow { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3.5px 0; color: rgba(232,224,208,0.62); }
+    .nrow.tot { border-top: 0.5px solid rgba(200,169,110,0.18); margin-top: 7px; padding-top: 10px; color: #f0e8d8; font-size: 13.5px; }
+    .nrow.tot .v { color: #c8a96e; font-family: 'Cormorant Garamond', serif; font-size: 18px; font-weight: 300; }
+    .nhi { color: #e8e0d0; }
+
+    /* Buttons */
+    .nb { width: 100%; padding: 13px 22px; background: #c8a96e; color: #1a1814; border: none; border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: 10.5px; letter-spacing: 2px; text-transform: uppercase; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+    .nb:hover { background: #d4b87e; }
+    .nb:disabled { background: rgba(200,169,110,0.28); color: rgba(26,24,20,0.45); cursor: not-allowed; }
+    .nbg { width: 100%; padding: 10px 22px; background: none; color: rgba(232,224,208,0.42); border: 0.5px solid rgba(232,224,208,0.13); border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; cursor: pointer; margin-top: 8px; transition: color 0.2s; }
+    .nbg:hover { color: #e8e0d0; }
+
+    /* Status */
+    .nst { padding: 9px 12px; border-radius: 8px; font-size: 11.5px; margin-bottom: 13px; display: none; line-height: 1.5; }
+    .nst.err { background: rgba(226,75,74,0.09); border: 0.5px solid rgba(226,75,74,0.22); color: #f09595; display: block; }
+    .nst.ok  { background: rgba(99,153,34,0.1);  border: 0.5px solid rgba(99,153,34,0.22);  color: #97c459; display: block; }
+    .nst.ld  { background: rgba(200,169,110,0.07); border: 0.5px solid rgba(200,169,110,0.18); color: #c8a96e; display: block; }
+    .spin { display: inline-block; width: 11px; height: 11px; border: 1.5px solid rgba(200,169,110,0.28); border-top-color: #c8a96e; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 5px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Stripe card */
+    #nc-card { background: rgba(255,255,255,0.04); border: 0.5px solid rgba(232,224,208,0.13); border-radius: 8px; padding: 12px 13px; margin-bottom: 5px; transition: border-color 0.2s; }
+    #nc-card.focused { border-color: rgba(200,169,110,0.45); }
+    #nc-card-err { color: #f09595; font-size: 11px; min-height: 16px; margin-bottom: 12px; }
+
+    /* Lock badge */
+    .nlock { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10px; color: rgba(232,224,208,0.28); margin-top: 10px; }
+
+    /* Confirm */
+    .ncheck { width: 44px; height: 44px; border-radius: 50%; background: rgba(200,169,110,0.13); border: 1px solid rgba(200,169,110,0.28); display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; font-size: 18px; }
+    .nctitle { font-family: 'Cormorant Garamond', serif; font-size: 20px; font-weight: 300; color: #f0e8d8; }
+    .ncref { font-size: 9.5px; letter-spacing: 2px; color: rgba(232,224,208,0.32); margin-top: 6px; }
+    .ncard-center { text-align: center; margin-bottom: 18px; }
+
+    .ndiv { height: 0.5px; background: rgba(232,224,208,0.07); margin: 16px 0; }
+    .nnote { font-size: 9.5px; color: rgba(232,224,208,0.2); text-align: center; margin-top: 13px; }
+    .nnote code { font-family: monospace; color: rgba(200,169,110,0.38); }
+</style>
+
+<div id="ncb">
+    <!-- Header -->
+    <div class="nh">
+        <div>
+            <div class="nh-eye">Book your stay</div>
+            <div class="nh-title" id="nc-prop-title">The Daelhoeve</div>
+        </div>
+        <div class="nh-right">
+            <div class="nh-from">from</div>
+            <div class="nh-price" id="nc-base-price">€185 <span>/ night</span></div>
+        </div>
+    </div>
+
+    <!-- Step indicators -->
+    <div class="ns">
+        <div class="ns-btn active" id="sb1"><span class="ns-num">1</span>Dates</div>
+        <div class="ns-btn" id="sb2"><span class="ns-num">2</span>Summary</div>
+        <div class="ns-btn" id="sb3"><span class="ns-num">3</span>Guest</div>
+        <div class="ns-btn" id="sb4"><span class="ns-num">4</span>Payment</div>
+        <div class="ns-btn" id="sb5"><span class="ns-num">5</span>Done</div>
+    </div>
+
+    <!-- ── Step 1: Dates ─────────────────────────────────────────────────── -->
+    <div class="np active" id="np1">
+        <div id="s1st" class="nst ld"><span class="spin"></span>Loading availability…</div>
+
+        <span class="nl">Select your stay</span>
+        <div class="ng2 nmb20">
+        <div>
+            <span class="nl" style="margin-bottom:8px">Check-in</span>
+            <input type="date" class="ni" id="nc-ci" />
+        </div>
+        <div>
+            <span class="nl" style="margin-bottom:8px">Check-out</span>
+            <input type="date" class="ni" id="nc-co" />
+        </div>
+        </div>
+
+        <span class="nl">Guests</span>
+        <div class="ng2 nmb20">
+            <div>
+                <span class="nl" style="margin-bottom:8px">Adults</span>
+                <div class="nc">
+                    <button class="nc-btn" id="na-">−</button>
+                    <span class="nc-val" id="nav">2</span>
+                    <button class="nc-btn" id="na+">+</button>
+                </div>
+            </div>
+            <div>
+                <span class="nl" style="margin-bottom:8px">Children</span>
+                <div class="nc">
+                    <button class="nc-btn" id="nc-">−</button>
+                    <span class="nc-val" id="ncv">0</span>
+                    <button class="nc-btn" id="nc+">+</button>
+                </div>
+            </div>
+        </div>
+
+        <button class="nb" id="nb1" disabled>Check availability →</button>
+        <div class="nnote">Availability via <code>GET /api/availability</code></div>
+    </div>
+
+    <!-- ── Step 2: Summary ───────────────────────────────────────────────── -->
+    <div class="np" id="np2">
+        <div id="s2st" class="nst"></div>
+        <span class="nl">Price breakdown</span>
+        <div class="nbox">
+            <div class="nrow"><span id="s-nights">—</span><span id="s-nc">€—</span></div>
+            <div class="nrow"><span>Cleaning fee</span><span id="s-cl">€—</span></div>
+            <div class="nrow"><span>City tax</span><span id="s-tx">€—</span></div>
+            <div class="nrow tot"><span>Total</span><span class="v" id="s-tot">€—</span></div>
+        </div>
+        <span class="nl">Stay details</span>
+        <div class="nbox nbox-alt">
+            <div class="nrow"><span>Property</span><span class="nhi" id="s-prop">The Daelhoeve</span></div>
+            <div class="nrow"><span>Check-in</span><span class="nhi" id="s-ci">—</span></div>
+            <div class="nrow"><span>Check-out</span><span class="nhi" id="s-co">—</span></div>
+            <div class="nrow"><span>Guests</span><span class="nhi" id="s-g">—</span></div>
+        </div>
+        <button class="nb" id="nb2">Continue →</button>
+        <button class="nbg" id="nback1">← Change dates</button>
+        <div class="nnote">Live pricing via <code>GET /api/pricing</code></div>
+    </div>
+
+    <!-- ── Step 3: Guest info ────────────────────────────────────────────── -->
+    <div class="np" id="np3">
+        <div id="s3st" class="nst"></div>
+        <span class="nl">Your details</span>
+        <div class="ng2 nmb14">
+            <div>
+                <span class="nl" style="margin-bottom:8px">First name</span>
+                <input type="text" class="ni" id="nc-gf" placeholder="Jan" />
+            </div>
+            <div>
+                <span class="nl" style="margin-bottom:8px">Last name</span>
+                <input type="text" class="ni" id="nc-gl" placeholder="de Vries" />
+            </div>
+            <div class="nfull">
+                <span class="nl" style="margin-bottom:8px">Email</span>
+                <input type="email" class="ni" id="nc-ge" placeholder="jan@email.com" />
+            </div>
+            <div class="nfull">
+                <span class="nl" style="margin-bottom:8px">Phone</span>
+                <input type="tel" class="ni" id="nc-gp" placeholder="+32 XXX XX XX XX" />
+            </div>
+            <div class="nfull">
+                <span class="nl" style="margin-bottom:8px">Special requests <span style="color:rgba(232,224,208,0.22);font-size:9px">(optional)</span></span>
+                <input type="text" class="ni" id="nc-gn" placeholder="Late check-in, allergies…" />
+            </div>
+        </div>
+        <button class="nb" id="nb3">Go to payment →</button>
+        <button class="nbg" id="nback2">← Back</button>
+    </div>
+
+    <!-- ── Step 4: Payment ───────────────────────────────────────────────── -->
+    <div class="np" id="np4">
+        <div id="s4st" class="nst"></div>
+        <span class="nl">Secure payment</span>
+
+        <div class="nbox" style="margin-bottom:18px">
+            <div class="nrow tot" style="margin-top:0;border-top:none;padding-top:0">
+                <span>Amount due</span><span class="v" id="pay-tot">€—</span>
+            </div>
+        </div>
+
+        <span class="nl" style="margin-bottom:10px">Card details</span>
+        <div id="nc-card"></div>
+        <div id="nc-card-err"></div>
+
+        <button class="nb" id="nb4">Pay now — <span id="pay-btn-tot">€—</span></button>
+        <button class="nbg" id="nback3">← Back</button>
+
+        <div class="nlock">
+            <svg width="10" height="12" viewBox="0 0 10 12" fill="none"><rect x="1" y="5" width="8" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M3 5V3.5a2 2 0 0 1 4 0V5" stroke="currentColor" stroke-width="1.2"/></svg>
+            Secured by Stripe — your card details are never stored on our servers
+        </div>
+        <div class="nnote" style="margin-top:8px">Payment via <code>POST /api/payment</code> → Stripe</div>
+    </div>
+
+    <!-- ── Step 5: Confirmed ─────────────────────────────────────────────── -->
+    <div class="np" id="np5">
+        <div class="ncard-center">
+            <div class="ncheck">✓</div>
+            <div class="nctitle">Booking confirmed</div>
+            <div style="font-size:11.5px;color:rgba(232,224,208,0.42);margin-top:4px">A confirmation has been sent to your email</div>
+            <div class="ncref" id="nc-ref">REF: —</div>
+        </div>
+        <div class="nbox">
+            <div class="nrow"><span>Property</span><span class="nhi" id="c-prop">The Daelhoeve</span></div>
+            <div class="nrow"><span>Check-in</span><span class="nhi" id="c-ci">—</span></div>
+            <div class="nrow"><span>Check-out</span><span class="nhi" id="c-co">—</span></div>
+            <div class="nrow"><span>Guests</span><span class="nhi" id="c-g">—</span></div>
+            <div class="nrow tot"><span>Total paid</span><span class="v" id="c-tot">€—</span></div>
+        </div>
+        <button class="nb" id="nc-reset">Book another stay</button>
+    </div>
+</div>
+
+<script>
+    (function () {
+    // ── CONFIG — replace these 2 values ──────────────────────────────────────
+    const API_BASE  = 'https://noscasa-api.vercel.app/';
+    const STRIPE_PK = 'pk_live_51TU3BDV05MGUqGdULbrtFwYsYUgBnhJxYMedsn44cq67SAOYZ9oQ1nFGZpOtdTzS0k8jRLg76I6hImpZ2Mpn26rU00myD0ZSXr';
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let adults = 2, children = 0, pricing = {}, bookedDates = new Set();
+    let stripe, cardEl;
+
+    // ── Stripe setup ─────────────────────────────────────────────────────────
+    stripe = Stripe(STRIPE_PK);
+    const elements = stripe.elements({
+        appearance: {
+        theme: 'night',
+        variables: { colorPrimary: '#c8a96e', fontFamily: 'DM Sans, sans-serif', borderRadius: '8px' }
+        }
+    });
+    cardEl = elements.create('card', {
+        style: { base: { fontFamily: 'DM Sans, sans-serif', fontSize: '13.5px', color: '#e8e0d0', '::placeholder': { color: 'rgba(232,224,208,0.3)' } } }
+    });
+    cardEl.mount('#nc-card');
+    cardEl.on('focus', () => document.getElementById('nc-card').classList.add('focused'));
+    cardEl.on('blur',  () => document.getElementById('nc-card').classList.remove('focused'));
+    cardEl.on('change', e => { document.getElementById('nc-card-err').textContent = e.error ? e.error.message : ''; });
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    const $  = id => document.getElementById(id);
+    const T  = new Date().toISOString().split('T')[0];
+
+    function fmt(s) {
+        if (!s) return '—';
+        return new Date(s + 'T12:00:00').toLocaleDateString('en-BE', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    function st(id, type, html) {
+        const el = $(id); el.className = 'nst ' + (type || ''); el.innerHTML = html || '';
+    }
+
+    function goStep(n) {
+        for (let i = 1; i <= 5; i++) {
+        $('np' + i).classList.toggle('active', i === n);
+        const b = $('sb' + i);
+        b.classList.remove('active', 'done');
+        if (i === n) b.classList.add('active');
+        else if (i < n) b.classList.add('done');
+        }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    $('nc-ci').min = T;
+    $('nc-co').min = T;
+
+    // Load availability for next 90 days
+    const to90 = new Date(Date.now() + 90 * 864e5).toISOString().split('T')[0];
+    fetch(`${API_BASE}/api/availability?from=${T}&to=${to90}`)
+        .then(r => r.json())
+        .then(({ days }) => {
+        days.forEach(d => { if (!d.available) bookedDates.add(d.date); });
+        st('s1st', 'ok', 'Availability loaded — select your stay below');
+        })
+        .catch(() => st('s1st', 'err', 'Could not load availability. Please refresh.'));
+
+    // ── Guests ────────────────────────────────────────────────────────────────
+    $('na-').onclick = () => { adults = Math.max(1, adults - 1); $('nav').textContent = adults; };
+    $('na+').onclick = () => { adults = Math.min(12, adults + 1); $('nav').textContent = adults; };
+    $('nc-').onclick = () => { children = Math.max(0, children - 1); $('ncv').textContent = children; };
+    $('nc+').onclick = () => { children = Math.min(8, children + 1); $('ncv').textContent = children; };
+
+    $('nc-ci').onchange = $('nc-co').onchange = () => {
+        const ci = $('nc-ci').value, co = $('nc-co').value;
+        $('nb1').disabled = !(ci && co && new Date(co) > new Date(ci));
+    };
+
+    // ── Step 1 → 2: Fetch pricing ─────────────────────────────────────────────
+    $('nb1').onclick = async () => {
+        const ci = $('nc-ci').value, co = $('nc-co').value;
+        st('s2st', 'ld', '<span class="spin"></span>Fetching live pricing from Guesty…');
+        goStep(2);
+
+        try {
+        const r = await fetch(`${API_BASE}/api/pricing?checkIn=${ci}&checkOut=${co}&guests=${adults + children}`);
+        pricing = await r.json();
+
+        const gStr = `${adults} adult${adults > 1 ? 's' : ''}${children ? `, ${children} child${children > 1 ? 'ren' : ''}` : ''}`;
+
+        $('s-nights').textContent  = `€${(pricing.fareAccommodation / pricing.nights)|0} × ${pricing.nights} night${pricing.nights > 1 ? 's' : ''}`;
+        $('s-nc').textContent      = `€${pricing.fareAccommodation}`;
+        $('s-cl').textContent      = `€${pricing.fareCleaning}`;
+        $('s-tx').textContent      = `€${pricing.cityTax}`;
+        $('s-tot').textContent     = `€${pricing.totalPrice}`;
+        $('pay-tot').textContent   = `€${pricing.totalPrice}`;
+        $('pay-btn-tot').textContent = `€${pricing.totalPrice}`;
+        $('c-tot').textContent     = `€${pricing.totalPrice}`;
+        $('s-ci').textContent  = $('c-ci').textContent = fmt(ci);
+        $('s-co').textContent  = $('c-co').textContent = fmt(co);
+        $('s-g').textContent   = $('c-g').textContent  = gStr;
+
+        st('s2st', 'ok', 'Pricing confirmed — availability held for 10 minutes');
+        } catch {
+        st('s2st', 'err', 'Could not load pricing. Please try again.');
+        }
+    };
+
+    $('nback1').onclick = () => goStep(1);
+
+    // ── Step 2 → 3 ────────────────────────────────────────────────────────────
+    $('nb2').onclick = () => goStep(3);
+    $('nback2').onclick = () => goStep(2);
+
+    // ── Step 3 → 4 ────────────────────────────────────────────────────────────
+    $('nb3').onclick = () => {
+        if (!$('nc-gf').value.trim() || !$('nc-gl').value.trim() || !$('nc-ge').value.trim()) {
+        st('s3st', 'err', 'Please fill in your first name, last name and email.');
+        return;
+        }
+        st('s3st', '', '');
+        goStep(4);
+    };
+
+    $('nback3').onclick = () => goStep(3);
+
+    // ── Step 4: Payment ────────────────────────────────────────────────────────
+    $('nb4').onclick = async () => {
+        $('nb4').disabled = true;
+        $('nc-card-err').textContent = '';
+
+        const ci    = $('nc-ci').value;
+        const co    = $('nc-co').value;
+        const email = $('nc-ge').value.trim();
+        const ref   = 'NC-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+        st('s4st', 'ld', '<span class="spin"></span>Initialising payment…');
+
+        try {
+        // 1. Create PaymentIntent on the backend
+        const payRes = await fetch(`${API_BASE}/api/payment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                amountCents: Math.round(pricing.totalPrice * 100),
+                currency: 'eur',
+                bookingRef: ref,
+                guestEmail: email,
+                description: `The Daelhoeve — ${ci} to ${co}`,
+            }),
+        });
+
+        const { clientSecret, paymentIntentId } = await payRes.json();
+
+        // 2. Confirm card payment via Stripe.js
+        st('s4st', 'ld', '<span class="spin"></span>Processing payment…');
+        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+            payment_method: {
+                card: cardEl,
+                billing_details: { name: `${$('nc-gf').value.trim()} ${$('nc-gl').value.trim()}`, email },
+            },
+        });
+
+        if (error) {
+            $('nc-card-err').textContent = error.message;
+            st('s4st', 'err', error.message);
+            $('nb4').disabled = false;
+            return;
+        }
+
+        // 3. Create reservation in Guesty + save to Webflow CMS
+        st('s4st', 'ld', '<span class="spin"></span>Confirming your reservation…');
+        const reserveRes = await fetch(`${API_BASE}/api/reserve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                checkIn: ci,
+                checkOut: co,
+                guests: adults + children,
+                guest: {
+                    firstName: $('nc-gf').value.trim(),
+                    lastName: $('nc-gl').value.trim(),
+                    email,
+                    phone: $('nc-gp').value.trim(),
+                },
+                pricing,
+                notes: $('nc-gn').value.trim(),
+                paymentIntentId: paymentIntent.id,
+                bookingRef: ref,
+            }),
+        });
+
+        const result = await reserveRes.json();
+        $('nc-ref').textContent = `REF: ${result.bookingRef || ref}`;
+        goStep(5);
+
+        } catch (err) {
+            st('s4st', 'err', 'Something went wrong. Please try again or contact us.');
+            $('nb4').disabled = false;
+        }
+    };
+
+    // ── Reset ─────────────────────────────────────────────────────────────────
+    $('nc-reset').onclick = () => {
+        $('nc-ci').value = $('nc-co').value = '';
+        adults = 2; children = 0; pricing = {};
+        $('nav').textContent = 2; $('ncv').textContent = 0;
+        $('nb1').disabled = true; $('nb4').disabled = false;
+        cardEl.clear();
+        goStep(1);
+    };
+
+    })();
+</script>
