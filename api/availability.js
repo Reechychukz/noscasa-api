@@ -26,7 +26,14 @@ module.exports = async (req, res) => {
 
     res.status(200).json({ days });
   } catch (err) {
-    console.error('[availability]', err.response?.data || err.message);
+    const body = err.response?.data || err.message;
+    console.error('[availability]', body);
+    if (body && typeof body === 'string' && body.includes('TOO_MANY_REQUESTS')) {
+      return res.status(429).json({ error: 'Guesty rate limit exceeded. Please try again shortly.' });
+    }
+    if (body?.error?.code === 'TOO_MANY_REQUESTS') {
+      return res.status(429).json({ error: 'Guesty rate limit exceeded. Please try again shortly.' });
+    }
     res.status(500).json({ error: 'Failed to fetch availability' });
   }
 };

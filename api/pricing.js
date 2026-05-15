@@ -54,7 +54,14 @@ module.exports = async function handler(req, res) {
             currency,
         });
     } catch (err) {
-        console.error('[pricing]', err.response?.data || err.message);
+        const body = err.response?.data || err.message;
+        console.error('[pricing]', body);
+        if (body && typeof body === 'string' && body.includes('TOO_MANY_REQUESTS')) {
+            return res.status(429).json({ error: 'Guesty rate limit exceeded. Please try again shortly.' });
+        }
+        if (body?.error?.code === 'TOO_MANY_REQUESTS') {
+            return res.status(429).json({ error: 'Guesty rate limit exceeded. Please try again shortly.' });
+        }
         res.status(500).json({ error: 'Failed to fetch pricing' });
     }
 };
