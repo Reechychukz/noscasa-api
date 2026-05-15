@@ -352,10 +352,32 @@
         $('nb1').disabled = !validation.valid || !LISTING_ID;
     }
 
+    function isDateRangeAvailable(ci, co) {
+        const start = new Date(ci);
+        const end = new Date(co);
+        const current = new Date(start);
+
+        while (current < end) {
+            const dateStr = current.toISOString().split('T')[0];
+            if (bookedDates.has(dateStr)) {
+                return false;
+            }
+            current.setDate(current.getDate() + 1);
+        }
+        return true;
+    }
+
     async function fetchPricing(ci, co) {
         const validation = validateBookingDates(ci, co);
         if (!validation.valid) {
             st('s2st', 'err', validation.error);
+            $('nb1').disabled = true;
+            return null;
+        }
+
+        // Check availability first
+        if (!isDateRangeAvailable(ci, co)) {
+            st('s2st', 'err', 'Selected dates are not available. Please choose different dates.');
             $('nb1').disabled = true;
             return null;
         }
@@ -456,12 +478,6 @@
     // ── Step 1 → 2: Fetch pricing ─────────────────────────────────────────────
     $('nb1').onclick = async () => {
         const ci = $('nc-ci').value, co = $('nc-co').value;
-        const validation = validateBookingDates(ci, co);
-
-        if (!validation.valid) {
-            st('s2st', 'err', validation.error);
-            return;
-        }
 
         if (!LISTING_ID) {
             st('s2st', 'err', 'Missing listing ID from CMS. Pricing cannot be fetched.');
@@ -470,7 +486,7 @@
 
         const price = await fetchPricing(ci, co);
         if (!price) {
-            st('s2st', 'err', 'Could not load pricing. Please try again.');
+            // Error already shown in fetchPricing
             return;
         }
 
@@ -523,6 +539,12 @@
         const validation = validateBookingDates(ci, co);
         if (!validation.valid) {
             st('s4st', 'err', validation.error);
+            $('nb4').disabled = false;
+            return;
+        }
+
+        if (!isDateRangeAvailable(ci, co)) {
+            st('s4st', 'err', 'Selected dates are no longer available. Please go back and select different dates.');
             $('nb4').disabled = false;
             return;
         }
