@@ -19,7 +19,12 @@ module.exports = async function handler(req, res) {
 
     try {
         // Get listing details for pricing and fees.
-        const listing = await guesty('GET', `/listings/${effectiveListingId}`);
+        const listings = await guesty('GET', '/listings', null, { ids: effectiveListingId });
+        const listing = Array.isArray(listings) ? listings[0] : listings;
+        if (!listing) {
+            return res.status(404).json({ error: 'Listing not found' });
+        }
+
         const prices = listing.prices || {};
         const basePrice = Number(prices.basePrice || 0);
         const fareAccommodation = basePrice * nights;

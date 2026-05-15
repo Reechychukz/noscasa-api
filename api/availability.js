@@ -34,16 +34,21 @@ module.exports = async (req, res) => {
         return res.status(200).json({ available, listing: available ? listing : null });
     } catch (err) {
         if (err.response?.status === 404) {
-            console.warn('[availability] availability filter unsupported, falling back to listing details lookup');
+            console.warn('[availability] availability filter unsupported, falling back to listing lookup by ids');
             try {
-                const listing = await guesty('GET', `/listings/${encodeURIComponent(effectiveListingId)}`);
+                const listings = await guesty('GET', '/listings', null, { ids: effectiveListingId });
+                const listing = Array.isArray(listings) ? listings[0] : listings;
+                if (!listing) {
+                    return res.status(404).json({ error: 'Listing not found' });
+                }
+
                 const available = typeof listing?.isAvailable === 'boolean'
                     ? listing.isAvailable
                     : typeof listing?.available === 'boolean'
                         ? listing.available
                         : typeof listing?.active === 'boolean'
                             ? listing.active
-                            : listing?.status?.toLowerCase() !== 'inactive';
+                            : listing.isListed !== false;
 
                 return res.status(200).json({
                     available: available !== false,

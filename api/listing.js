@@ -12,11 +12,15 @@ module.exports = async function handler(req, res) {
     }
 
     try {
-        const params = {};
+        const params = { ids: id };
         if (fields) params.fields = fields;
 
-        const result = await guesty('GET', `/listings/${encodeURIComponent(id)}`, null, params);
-        res.status(200).json(result);
+        const result = await guesty('GET', '/listings', null, params);
+        const listing = Array.isArray(result) ? result[0] : result;
+        if (!listing) {
+            return res.status(404).json({ error: 'Listing not found.' });
+        }
+        res.status(200).json(listing);
     } catch (err) {
         const body = err.response?.data || err.message;
         console.error('[listing]', body);
