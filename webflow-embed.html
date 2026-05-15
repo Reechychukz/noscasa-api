@@ -293,7 +293,7 @@
     const MIN_CHECKOUT_DATE = new Date(Date.now() + 3 * 864e5).toISOString().split('T')[0];
     const MAX_LOOKAHEAD_DATE = new Date(Date.now() + 90 * 864e5).toISOString().split('T')[0];
 
-    let adults = 2, children = 0, pricing = {}, bookedDates = new Set();
+    let adults = 2, children = 0, pricing = {};
     let pricingRequestInProgress = false;
     let lastPricingKey = null;
     let stripe, cardEl;
@@ -352,19 +352,18 @@
         $('nb1').disabled = !validation.valid || !LISTING_ID;
     }
 
-    function isDateRangeAvailable(ci, co) {
-        const start = new Date(ci);
-        const end = new Date(co);
-        const current = new Date(start);
-
-        while (current < end) {
-            const dateStr = current.toISOString().split('T')[0];
-            if (bookedDates.has(dateStr)) {
-                return false;
+    async function checkListingAvailability(ci, co) {
+        try {
+            const response = await fetch(`${API_BASE}/api/availability?from=${ci}&to=${co}&listing_id=${encodeURIComponent(LISTING_ID)}`);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data?.error || data?.message || 'Failed to check availability');
             }
-            current.setDate(current.getDate() + 1);
+            return data.available === true;
+        } catch (err) {
+            st('s2st', 'err', err.message || 'Failed to check availability');
+            return false;
         }
-        return true;
     }
 
     async function fetchPricing(ci, co) {
@@ -375,9 +374,9 @@
             return null;
         }
 
-        // Check availability first
-        if (!isDateRangeAvailable(ci, co)) {
-            st('s2st', 'err', 'Selected dates are not available. Please choose different dates.');
+        const available = await checkListingAvailability(ci, co);
+        if (!available) {
+            st('s2st', 'err', 'Selected listing is not available for the chosen dates.');
             $('nb1').disabled = true;
             return null;
         }
@@ -448,18 +447,10 @@
     $('nc-ci').min = MIN_CHECKIN_DATE;
     $('nc-co').min = MIN_CHECKOUT_DATE;
 
-    // Load availability for next 90 days
-    const to90 = new Date(Date.now() + 90 * 864e5).toISOString().split('T')[0];
     if (!LISTING_ID) {
-        st('s1st', 'err', 'Missing listing ID from CMS; availability cannot be loaded.');
+        st('s1st', 'err', 'Missing listing ID from CMS; availability cannot be checked.');
     } else {
-        fetch(`${API_BASE}/api/availability?from=${T}&to=${to90}&listing_id=${encodeURIComponent(LISTING_ID)}`)
-            .then(r => r.json())
-            .then(({ days }) => {
-            days.forEach(d => { if (!d.available) bookedDates.add(d.date); });
-            st('s1st', 'ok', 'Availability loaded — select your stay below');
-            })
-            .catch(() => st('s1st', 'err', 'Could not load availability. Please refresh.'));
+        st('s1st', 'ld', '<span class="spin"></span>Select your dates and check availability.');
     }
 
     // ── Guests ────────────────────────────────────────────────────────────────
@@ -543,8 +534,9 @@
             return;
         }
 
-        if (!isDateRangeAvailable(ci, co)) {
-            st('s4st', 'err', 'Selected dates are no longer available. Please go back and select different dates.');
+        const available = await checkListingAvailability(ci, co);
+        if (!available) {
+            st('s4st', 'err', 'Selected listing is no longer available. Please go back and choose a different date range.');
             $('nb4').disabled = false;
             return;
         }

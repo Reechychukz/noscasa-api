@@ -15,39 +15,21 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: validation.error });
     }
 
-    const { listingId: effectiveListingId, checkIn, checkOut } = validation;
+    const { listingId: effectiveListingId, checkIn, checkOut, nights } = validation;
 
     try {
-        // Get calendar data for pricing per night
-        const calendarRes = await guesty('GET', `/listings/${effectiveListingId}/calendar`, null, { from: checkIn, to: checkOut });
-
-        // Get listing details for base prices (cleaning fee, etc.)
-        const listingRes = await guesty('GET', `/listings/${effectiveListingId}`);
-
-        const days = calendarRes.days || [];
-        const listing = listingRes;
+        // Get listing details for pricing and fees.
+        const listing = await guesty('GET', `/listings/${effectiveListingId}`);
         const prices = listing.prices || {};
-
-        // Calculate accommodation total from calendar prices
-        let fareAccommodation = 0;
-        let nights = 0;
-
-        for (const day of days) {
-            if (day.status === 'available' && day.price) {
-                fareAccommodation += day.price;
-                nights++;
-            }
-        }
-
-        // Get other fees from listing
-        const fareCleaning = prices.cleaningFee || 0;
+        const basePrice = Number(prices.basePrice || 0);
+        const fareAccommodation = basePrice * nights;
+        const fareCleaning = Number(prices.cleaningFee || 0);
         const currency = prices.currency || 'EUR';
 
-        // Calculate total (you may need to add taxes, etc. based on your business logic)
         const totalPrice = fareAccommodation + fareCleaning;
 
         res.status(200).json({
-            nights,
+            nights: dateValidation.nights,
             fareAccommodation,
             fareCleaning,
             cityTax: 0, // Add if you have city tax logic
