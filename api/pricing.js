@@ -2,7 +2,7 @@
 // GET /api/pricing?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD&guests=N&listingId=xxx
 // Returns a full price breakdown for the selected stay from Guesty.
 
-const { guestyClient } = require('../lib/guesty');
+const { guesty } = require('../lib/guesty');
 const { applyCors } = require('../lib/cors');
 
 module.exports = async function handler(req, res) {
@@ -17,19 +17,14 @@ module.exports = async function handler(req, res) {
     }
 
     try {
-        const guesty = guestyClient();
-
         // Get calendar data for pricing per night
-        const calendarRes = await guesty.get(`/listings/${effectiveListingId}/calendar`, {
-            from: checkIn,
-            to: checkOut,
-        });
+        const calendarRes = await guesty('GET', `/listings/${effectiveListingId}/calendar`, null, { from: checkIn, to: checkOut });
 
         // Get listing details for base prices (cleaning fee, etc.)
-        const listingRes = await guesty.get(`/listings/${effectiveListingId}`);
+        const listingRes = await guesty('GET', `/listings/${effectiveListingId}`);
 
-        const days = calendarRes.data.days || [];
-        const listing = listingRes.data;
+        const days = calendarRes.days || [];
+        const listing = listingRes;
         const prices = listing.prices || {};
 
         // Calculate accommodation total from calendar prices
