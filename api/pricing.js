@@ -19,8 +19,8 @@ module.exports = async function handler(req, res) {
 
     try {
         // Get listing details for pricing and fees.
-        const listings = await guesty('GET', '/listings', null, { ids: effectiveListingId });
-        const listing = Array.isArray(listings) ? listings[0] : listings;
+        const response = await guesty('GET', '/listings', null, { ids: effectiveListingId });
+        const listing = response?.results?.[0];
         if (!listing) {
             return res.status(404).json({ error: 'Listing not found' });
         }

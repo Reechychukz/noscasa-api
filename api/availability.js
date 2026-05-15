@@ -19,25 +19,21 @@ module.exports = async (req, res) => {
 
     try {
         const availableFilter = JSON.stringify({ checkIn: from, checkOut: to, minOccupancy: 1 });
-        const listings = await guesty('GET', '/listings', null, {
+        const response = await guesty('GET', '/listings', null, {
             ids: effectiveListingId,
             available: availableFilter,
         });
 
-        const available = Array.isArray(listings)
-            ? listings.length > 0
-            : Array.isArray(listings?.results) && listings.results.length > 0;
-        const listing = Array.isArray(listings)
-            ? listings[0]
-            : listings?.results?.[0] || null;
+        const available = response?.results?.length > 0;
+        const listing = response?.results?.[0] || null;
 
         return res.status(200).json({ available, listing: available ? listing : null });
     } catch (err) {
         if (err.response?.status === 404) {
             console.warn('[availability] availability filter unsupported, falling back to listing lookup by ids');
             try {
-                const listings = await guesty('GET', '/listings', null, { ids: effectiveListingId });
-                const listing = Array.isArray(listings) ? listings[0] : listings;
+                const response = await guesty('GET', '/listings', null, { ids: effectiveListingId });
+                const listing = response?.results?.[0];
                 if (!listing) {
                     return res.status(404).json({ error: 'Listing not found' });
                 }

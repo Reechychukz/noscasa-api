@@ -15,8 +15,8 @@ module.exports = async function handler(req, res) {
         const params = { ids: id };
         if (fields) params.fields = fields;
 
-        const result = await guesty('GET', '/listings', null, params);
-        const listing = Array.isArray(result) ? result[0] : result;
+        const response = await guesty('GET', '/listings', null, params);
+        const listing = response?.results?.[0];
         if (!listing) {
             return res.status(404).json({ error: 'Listing not found.' });
         }
