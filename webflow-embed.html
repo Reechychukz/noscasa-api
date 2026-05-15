@@ -290,7 +290,33 @@
     }
 
     let adults = 2, children = 0, pricing = {}, bookedDates = new Set();
+    let pricingRequestInProgress = false;
+    let lastPricingKey = null;
     let stripe, cardEl;
+
+    async function fetchPricing(ci, co) {
+        const key = `${ci}|${co}|${LISTING_ID}|${adults + children}`;
+        if (pricingRequestInProgress) return null;
+        if (lastPricingKey === key && pricing && pricing.totalPrice != null) {
+            return pricing;
+        }
+
+        pricingRequestInProgress = true;
+        $('nb1').disabled = true;
+        try {
+            const response = await fetch(`${API_BASE}/api/pricing?checkIn=${ci}&checkOut=${co}&guests=${adults + children}&listing_id=${encodeURIComponent(LISTING_ID)}`);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data?.error || data?.message || 'Failed to load pricing');
+            }
+            pricing = data;
+            lastPricingKey = key;
+            return pricing;
+        } finally {
+            pricingRequestInProgress = false;
+            $('nb1').disabled = !(ci && co && new Date(co) > new Date(ci));
+        }
+    }
 
     // ── Stripe setup ─────────────────────────────────────────────────────────
     stripe = Stripe(STRIPE_PK);
@@ -363,17 +389,20 @@
     // ── Step 1 → 2: Fetch pricing ─────────────────────────────────────────────
     $('nb1').onclick = async () => {
         const ci = $('nc-ci').value, co = $('nc-co').value;
-        st('s2st', 'ld', '<span class="spin"></span>Fetching live pricing from Guesty…');
-        goStep(2);
 
         if (!LISTING_ID) {
             st('s2st', 'err', 'Missing listing ID from CMS. Pricing cannot be fetched.');
             return;
         }
 
-        try {
-        const r = await fetch(`${API_BASE}/api/pricing?checkIn=${ci}&checkOut=${co}&guests=${adults + children}&listing_id=${encodeURIComponent(LISTING_ID)}`);
-        pricing = await r.json();
+        const price = await fetchPricing(ci, co);
+        if (!price) {
+            st('s2st', 'err', 'Could not load pricing. Please try again.');
+            return;
+        }
+
+        st('s2st', 'ok', 'Pricing confirmed — availability held for 10 minutes');
+        goStep(2);
 
         const gStr = `${adults} adult${adults > 1 ? 's' : ''}${children ? `, ${children} child${children > 1 ? 'ren' : ''}` : ''}`;
 
@@ -388,11 +417,6 @@
         $('s-ci').textContent  = $('c-ci').textContent = fmt(ci);
         $('s-co').textContent  = $('c-co').textContent = fmt(co);
         $('s-g').textContent   = $('c-g').textContent  = gStr;
-
-        st('s2st', 'ok', 'Pricing confirmed — availability held for 10 minutes');
-        } catch {
-        st('s2st', 'err', 'Could not load pricing. Please try again.');
-        }
     };
 
     $('nback1').onclick = () => goStep(1);
