@@ -9,7 +9,8 @@
   "dependencies": {
     "@vercel/edge-config": "^1.4.3",
     "cors": "^2.8.5",
-    "redis": "^5.12.1"
+    "redis": "^5.12.1",
+    "stripe": "^22.1.1"
   },
   "keywords": [],
   "author": "",
