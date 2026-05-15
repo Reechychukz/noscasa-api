@@ -289,12 +289,77 @@
         console.warn('No listing ID found. Set #nc-listing-id.value, data-listing-id on #ncb, name="listing_id", or window.NOSCASSA_LISTING_ID.');
     }
 
+    const MIN_CHECKIN_DATE = new Date(Date.now() + 2 * 864e5).toISOString().split('T')[0];
+    const MIN_CHECKOUT_DATE = new Date(Date.now() + 3 * 864e5).toISOString().split('T')[0];
+    const MAX_LOOKAHEAD_DATE = new Date(Date.now() + 90 * 864e5).toISOString().split('T')[0];
+
     let adults = 2, children = 0, pricing = {}, bookedDates = new Set();
     let pricingRequestInProgress = false;
     let lastPricingKey = null;
     let stripe, cardEl;
 
+    function parseDateInput(value) {
+        if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+        const date = new Date(`${value}T00:00:00`);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function validateBookingDates(ci, co) {
+        const checkInDate = parseDateInput(ci);
+        const checkOutDate = parseDateInput(co);
+
+        if (!checkInDate || !checkOutDate) {
+            return { valid: false, error: 'Select valid check-in and check-out dates.' };
+        }
+
+        const earliestCheckIn = parseDateInput(MIN_CHECKIN_DATE);
+        if (checkInDate < earliestCheckIn) {
+            return { valid: false, error: 'Check-in must be at least 2 days from today.' };
+        }
+
+        if (ci > MAX_LOOKAHEAD_DATE || co > MAX_LOOKAHEAD_DATE) {
+            return { valid: false, error: 'Please select dates within the next 90 days.' };
+        }
+
+        if (checkOutDate <= checkInDate) {
+            return { valid: false, error: 'Check-out must be after check-in.' };
+        }
+
+        return { valid: true };
+    }
+
+    function updateCheckoutMin() {
+        const checkInValue = $('nc-ci').value;
+        const checkInDate = parseDateInput(checkInValue);
+        let minCheckout = MIN_CHECKOUT_DATE;
+
+        if (checkInDate) {
+            const nextDay = new Date(checkInDate.getTime());
+            nextDay.setDate(nextDay.getDate() + 1);
+            minCheckout = nextDay.toISOString().split('T')[0];
+        }
+
+        $('nc-co').min = minCheckout;
+        if ($('nc-co').value && $('nc-co').value < minCheckout) {
+            $('nc-co').value = minCheckout;
+        }
+    }
+
+    function updateBookButtonState() {
+        const ci = $('nc-ci').value;
+        const co = $('nc-co').value;
+        const validation = validateBookingDates(ci, co);
+        $('nb1').disabled = !validation.valid || !LISTING_ID;
+    }
+
     async function fetchPricing(ci, co) {
+        const validation = validateBookingDates(ci, co);
+        if (!validation.valid) {
+            st('s2st', 'err', validation.error);
+            $('nb1').disabled = true;
+            return null;
+        }
+
         const key = `${ci}|${co}|${LISTING_ID}|${adults + children}`;
         if (pricingRequestInProgress) return null;
         if (lastPricingKey === key && pricing && pricing.totalPrice != null) {
@@ -314,7 +379,7 @@
             return pricing;
         } finally {
             pricingRequestInProgress = false;
-            $('nb1').disabled = !(ci && co && new Date(co) > new Date(ci));
+            updateBookButtonState();
         }
     }
 
@@ -358,8 +423,8 @@
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
-    $('nc-ci').min = T;
-    $('nc-co').min = T;
+    $('nc-ci').min = MIN_CHECKIN_DATE;
+    $('nc-co').min = MIN_CHECKOUT_DATE;
 
     // Load availability for next 90 days
     const to90 = new Date(Date.now() + 90 * 864e5).toISOString().split('T')[0];
@@ -381,14 +446,22 @@
     $('nc-').onclick = () => { children = Math.max(0, children - 1); $('ncv').textContent = children; };
     $('nc+').onclick = () => { children = Math.min(8, children + 1); $('ncv').textContent = children; };
 
-    $('nc-ci').onchange = $('nc-co').onchange = () => {
-        const ci = $('nc-ci').value, co = $('nc-co').value;
-        $('nb1').disabled = !(ci && co && new Date(co) > new Date(ci));
+    $('nc-ci').onchange = () => {
+        updateCheckoutMin();
+        updateBookButtonState();
     };
+
+    $('nc-co').onchange = updateBookButtonState;
 
     // ── Step 1 → 2: Fetch pricing ─────────────────────────────────────────────
     $('nb1').onclick = async () => {
         const ci = $('nc-ci').value, co = $('nc-co').value;
+        const validation = validateBookingDates(ci, co);
+
+        if (!validation.valid) {
+            st('s2st', 'err', validation.error);
+            return;
+        }
 
         if (!LISTING_ID) {
             st('s2st', 'err', 'Missing listing ID from CMS. Pricing cannot be fetched.');
@@ -446,6 +519,25 @@
         const co    = $('nc-co').value;
         const email = $('nc-ge').value.trim();
         const ref   = 'NC-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+        const validation = validateBookingDates(ci, co);
+        if (!validation.valid) {
+            st('s4st', 'err', validation.error);
+            $('nb4').disabled = false;
+            return;
+        }
+
+        if (!email) {
+            st('s4st', 'err', 'Please enter a valid email address.');
+            $('nb4').disabled = false;
+            return;
+        }
+
+        if (!pricing || typeof pricing.totalPrice !== 'number' || pricing.totalPrice <= 0) {
+            st('s4st', 'err', 'Pricing is not available. Please go back and refresh your booking details.');
+            $('nb4').disabled = false;
+            return;
+        }
 
         st('s4st', 'ld', '<span class="spin"></span>Initialising payment…');
 

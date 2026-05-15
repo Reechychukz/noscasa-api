@@ -4,16 +4,18 @@
 
 const { guesty } = require('../lib/guesty');
 const { cors } = require('../lib/cors');
+const { validateAvailabilityQuery } = require('../lib/booking-validation');
 
 module.exports = async (req, res) => {
   if (cors(req, res)) return;
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { from, to, listingId, listing_id } = req.query;
-  const effectiveListingId = listingId || listing_id || process.env.GUESTY_LISTING_ID;
-  if (!from || !to || !effectiveListingId) {
-    return res.status(400).json({ error: 'Missing params: from, to, listingId/listing_id' });
+  const validation = validateAvailabilityQuery(req.query);
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
   }
+
+  const { listingId: effectiveListingId, from, to } = validation;
 
   try {
     const data = await guesty('GET', `/listings/${effectiveListingId}/calendar`, null, { from, to });

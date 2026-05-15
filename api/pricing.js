@@ -4,17 +4,18 @@
 
 const { guesty } = require('../lib/guesty');
 const { applyCors } = require('../lib/cors');
+const { validatePricingQuery } = require('../lib/booking-validation');
 
 module.exports = async function handler(req, res) {
     if (applyCors(req, res)) return;
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-    const { checkIn, checkOut, guests, listingId, listing_id } = req.query;
-    const effectiveListingId = listingId || listing_id;
-
-    if (!checkIn || !checkOut || !effectiveListingId) {
-        return res.status(400).json({ error: 'Missing required params: checkIn, checkOut, listingId/listing_id' });
+    const validation = validatePricingQuery(req.query);
+    if (!validation.valid) {
+        return res.status(400).json({ error: validation.error });
     }
+
+    const { listingId: effectiveListingId, checkIn, checkOut } = validation;
 
     try {
         // Get calendar data for pricing per night

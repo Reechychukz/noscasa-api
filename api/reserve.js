@@ -14,17 +14,28 @@
 const { guesty } = require('../lib/guesty');
 const { createItem, publishItems } = require('../lib/webflow');
 const { cors } = require('../lib/cors');
+const { validateReservationPayload } = require('../lib/booking-validation');
 
 module.exports = async (req, res) => {
   if (cors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { checkIn, checkOut, guests, guest, pricing, notes, paymentIntentId, bookingRef, listingId, listing_id } = req.body;
-  const effectiveListingId = listingId || listing_id || process.env.GUESTY_LISTING_ID;
-
-  if (!checkIn || !checkOut || !guest?.email || !effectiveListingId) {
-    return res.status(400).json({ error: 'Missing required fields: checkIn, checkOut, guest.email, listingId/listing_id' });
+  const validation = validateReservationPayload(req.body);
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
   }
+
+  const {
+    listingId: effectiveListingId,
+    guests: guestsCount,
+    guest,
+    notes,
+    paymentIntentId,
+    bookingRef,
+    checkIn,
+    checkOut,
+    pricing,
+  } = validation;
 
   try {
     // ── Step 1: Create or find guest in Guesty ─────────────────────────────
@@ -49,7 +60,7 @@ module.exports = async (req, res) => {
       listingId: effectiveListingId,
       checkInDateLocalized: checkIn,
       checkOutDateLocalized: checkOut,
-      guestsCount: guests || 2,
+      guestsCount: guestsCount || 2,
       guestId,
       source: 'webflow-direct',
       status: 'confirmed',
@@ -83,7 +94,7 @@ module.exports = async (req, res) => {
       // Stay details
       'check-in': checkIn,
       'check-out': checkOut,
-      'guests-count': guests || 2,
+      'guests-count': guestsCount || 2,
       'special-requests': notes || '',
 
       // Pricing
