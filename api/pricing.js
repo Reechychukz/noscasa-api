@@ -9,23 +9,24 @@ module.exports = async function handler(req, res) {
     if (applyCors(req, res)) return;
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-    const { checkIn, checkOut, guests, listingId } = req.query;
+    const { checkIn, checkOut, guests, listingId, listing_id } = req.query;
+    const effectiveListingId = listingId || listing_id;
 
-    if (!checkIn || !checkOut || !listingId) {
-        return res.status(400).json({ error: 'Missing required params: checkIn, checkOut, listingId' });
+    if (!checkIn || !checkOut || !effectiveListingId) {
+        return res.status(400).json({ error: 'Missing required params: checkIn, checkOut, listingId/listing_id' });
     }
 
     try {
         const guesty = guestyClient();
 
         // Get calendar data for pricing per night
-        const calendarRes = await guesty.get(`/listings/${listingId}/calendar`, {
+        const calendarRes = await guesty.get(`/listings/${effectiveListingId}/calendar`, {
             from: checkIn,
             to: checkOut,
         });
 
         // Get listing details for base prices (cleaning fee, etc.)
-        const listingRes = await guesty.get(`/listings/${listingId}`);
+        const listingRes = await guesty.get(`/listings/${effectiveListingId}`);
 
         const days = calendarRes.data.days || [];
         const listing = listingRes.data;

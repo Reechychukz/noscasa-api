@@ -19,10 +19,11 @@ module.exports = async (req, res) => {
   if (cors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { checkIn, checkOut, guests, guest, pricing, notes, paymentIntentId, bookingRef } = req.body;
+  const { checkIn, checkOut, guests, guest, pricing, notes, paymentIntentId, bookingRef, listingId, listing_id } = req.body;
+  const effectiveListingId = listingId || listing_id || process.env.GUESTY_LISTING_ID;
 
-  if (!checkIn || !checkOut || !guest?.email) {
-    return res.status(400).json({ error: 'Missing required fields' });
+  if (!checkIn || !checkOut || !guest?.email || !effectiveListingId) {
+    return res.status(400).json({ error: 'Missing required fields: checkIn, checkOut, guest.email, listingId/listing_id' });
   }
 
   try {
@@ -45,7 +46,7 @@ module.exports = async (req, res) => {
 
     // ── Step 2: Create reservation in Guesty ──────────────────────────────
     const reservation = await guesty('POST', '/reservations', {
-      listingId: process.env.GUESTY_LISTING_ID,
+      listingId: effectiveListingId,
       checkInDateLocalized: checkIn,
       checkOutDateLocalized: checkOut,
       guestsCount: guests || 2,

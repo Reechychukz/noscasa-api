@@ -112,7 +112,9 @@
     .nnote code { font-family: monospace; color: rgba(200,169,110,0.38); }
 </style>
 
-<div id="ncb">
+<div id="ncb" data-listing-id="">
+    <!-- Set this listing ID from your Webflow CMS entry using a dynamic field value -->
+    <input type="hidden" id="nc-listing-id" value="" />
     <!-- Header -->
     <div class="nh">
         <div>
@@ -277,6 +279,16 @@
     const STRIPE_PK = 'pk_live_51TU3BDV05MGUqGdULbrtFwYsYUgBnhJxYMedsn44cq67SAOYZ9oQ1nFGZpOtdTzS0k8jRLg76I6hImpZ2Mpn26rU00myD0ZSXr';
     // ─────────────────────────────────────────────────────────────────────────
 
+    const LISTING_ID = document.querySelector('#nc-listing-id')?.value
+        || document.getElementById('ncb')?.dataset.listingId
+        || document.querySelector('[name="listing_id"]')?.value
+        || window.NOSCASSA_LISTING_ID
+        || null;
+
+    if (!LISTING_ID) {
+        console.warn('No listing ID found. Set #nc-listing-id.value, data-listing-id on #ncb, name="listing_id", or window.NOSCASSA_LISTING_ID.');
+    }
+
     let adults = 2, children = 0, pricing = {}, bookedDates = new Set();
     let stripe, cardEl;
 
@@ -325,13 +337,17 @@
 
     // Load availability for next 90 days
     const to90 = new Date(Date.now() + 90 * 864e5).toISOString().split('T')[0];
-    fetch(`${API_BASE}/api/availability?from=${T}&to=${to90}`)
-        .then(r => r.json())
-        .then(({ days }) => {
-        days.forEach(d => { if (!d.available) bookedDates.add(d.date); });
-        st('s1st', 'ok', 'Availability loaded — select your stay below');
-        })
-        .catch(() => st('s1st', 'err', 'Could not load availability. Please refresh.'));
+    if (!LISTING_ID) {
+        st('s1st', 'err', 'Missing listing ID from CMS; availability cannot be loaded.');
+    } else {
+        fetch(`${API_BASE}/api/availability?from=${T}&to=${to90}&listing_id=${encodeURIComponent(LISTING_ID)}`)
+            .then(r => r.json())
+            .then(({ days }) => {
+            days.forEach(d => { if (!d.available) bookedDates.add(d.date); });
+            st('s1st', 'ok', 'Availability loaded — select your stay below');
+            })
+            .catch(() => st('s1st', 'err', 'Could not load availability. Please refresh.'));
+    }
 
     // ── Guests ────────────────────────────────────────────────────────────────
     $('na-').onclick = () => { adults = Math.max(1, adults - 1); $('nav').textContent = adults; };
@@ -350,8 +366,13 @@
         st('s2st', 'ld', '<span class="spin"></span>Fetching live pricing from Guesty…');
         goStep(2);
 
+        if (!LISTING_ID) {
+            st('s2st', 'err', 'Missing listing ID from CMS. Pricing cannot be fetched.');
+            return;
+        }
+
         try {
-        const r = await fetch(`${API_BASE}/api/pricing?checkIn=${ci}&checkOut=${co}&guests=${adults + children}`);
+        const r = await fetch(`${API_BASE}/api/pricing?checkIn=${ci}&checkOut=${co}&guests=${adults + children}&listing_id=${encodeURIComponent(LISTING_ID)}`);
         pricing = await r.json();
 
         const gStr = `${adults} adult${adults > 1 ? 's' : ''}${children ? `, ${children} child${children > 1 ? 'ren' : ''}` : ''}`;
@@ -444,6 +465,7 @@
             body: JSON.stringify({
                 checkIn: ci,
                 checkOut: co,
+                listingId: LISTING_ID,
                 guests: adults + children,
                 guest: {
                     firstName: $('nc-gf').value.trim(),
