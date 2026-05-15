@@ -34,7 +34,7 @@ module.exports = async function handler(req, res) {
         const totalPrice = fareAccommodation + fareCleaning;
 
         res.status(200).json({
-            nights: dateValidation.nights,
+            nights,
             fareAccommodation,
             fareCleaning,
             cityTax: 0, // Add if you have city tax logic

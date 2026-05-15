@@ -8,9 +8,7 @@
   },
   "dependencies": {
     "@vercel/edge-config": "^1.4.3",
-    "axios": "^1.15.2",
     "cors": "^2.8.5",
-    "qs": "^6.15.1",
     "redis": "^5.12.1"
   },
   "keywords": [],
